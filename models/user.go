@@ -6,10 +6,11 @@ import (
 
 type User struct {
 	gorm.Model
-	ID        uint     `gorm:"primaryKey"`
-	Name      string   `json:"name"`
-	Email     string   `json:"email"`
-	WatchList []string `json:"watch_list"`
+	ID         uint        `gorm:"primaryKey"`
+	Name       string      `json:"name"`
+	Email      string      `json:"email" gorm:"unique"`
+	Purchases  []Purchase  `gorm:"foreignKey:UserID"`
+	WatchItems []WatchItem `gorm:"foreignKey:UserID"`
 }
 
 func (u *User) CreateUser(db *gorm.DB) error {
@@ -27,5 +28,3 @@ func FindUserByID(id int, db *gorm.DB) (User, error) {
 	}
 	return user, nil
 }
-
-//func FindUserWatchList(id int, db *gorm.DB)
