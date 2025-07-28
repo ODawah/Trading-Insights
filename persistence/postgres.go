@@ -9,7 +9,7 @@ import (
 	"os"
 )
 
-func InitPG() *gorm.DB {
+func InitPG() (*gorm.DB, error) {
 	err := godotenv.Load(".env")
 	if err != nil {
 		log.Fatalf("Error loading .env file: %s", err)
@@ -25,10 +25,9 @@ func InitPG() *gorm.DB {
 	)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		return nil, err
 	}
 
-	return db
+	return db, err
 }
