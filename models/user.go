@@ -1,30 +1,29 @@
 package models
 
 import (
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 type User struct {
 	gorm.Model
-	ID         uint        `gorm:"primaryKey"`
-	Name       string      `json:"name"`
-	Email      string      `json:"email" gorm:"unique"`
-	Purchases  []Purchase  `gorm:"foreignKey:UserID"`
-	WatchItems []WatchItem `gorm:"foreignKey:UserID"`
+	Name         string        `json:"name"`
+	Password     string        `gorm:"not null" json:"-"`
+	Email        string        `gorm:"uniqueIndex;not null" json:"email"`
+	Transactions []Transaction `gorm:"foreignKey:UserID"`
+	WatchItems   []WatchItem   `gorm:"foreignKey:UserID"`
 }
 
-func (u *User) CreateUser(db *gorm.DB) error {
-	err := db.Create(&u).Error
+func (u *User) HashPassword(password string) error {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	return err
+	u.Password = string(hashedPassword)
+	return nil
 }
 
-func FindUserByID(id int, db *gorm.DB) (User, error) {
-	var user User
-	if err := db.First(&user, id).Error; err != nil {
-		return user, err
-	}
-	return user, nil
+func (u *User) CheckPassword(password string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password))
+	return err == nil
 }

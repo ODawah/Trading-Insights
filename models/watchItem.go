@@ -4,6 +4,7 @@ import "gorm.io/gorm"
 
 type WatchItem struct {
 	gorm.Model
-	Ticker string `json:"symbol" gorm:"unique"`
-	UserID uint
+	Ticker string `json:"ticker"`
+	UserID uint   `json:"user_id"`
+	User   User
 }

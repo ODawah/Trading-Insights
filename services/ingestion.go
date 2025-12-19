@@ -3,74 +3,69 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/ODawah/Trading-Insights/models"
-	"github.com/ODawah/Trading-Insights/persistence"
-	"gorm.io/gorm"
-	"io"
-	"log"
+	"github.com/ODawah/Trading-Insights/repository"
 	"net/http"
 	"os"
 	"time"
 )
 
-func FetchAllCurrencies(cache persistence.RedisRepository, db gorm.DB) (*models.Snapshot, error) {
-	var snapshot models.Snapshot
-	currencies := os.Getenv("EXCONVERT_URL")
-	request, err := http.NewRequest(http.MethodGet, currencies, nil)
-	now := time.Now()
-	if err != nil {
-		return nil, err
-	}
-	res, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	snapshot.Timestamp = now
-	defer res.Body.Close()
-
-	resBody, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-	err = json.Unmarshal(resBody, &snapshot)
-	if err != nil {
-		return nil, err
-	}
-	ctx := context.Background()
-	encoded, err := json.Marshal(snapshot)
-	if err != nil {
-		return nil, err
-	}
-	go func(s models.Snapshot) {
-		var rates []models.Currency
-		for ticker, rate := range s.Result {
-			rates = append(rates, models.Currency{
-				Ticker:      ticker,
-				Rate:        rate,
-				FetchedTime: now,
-			})
-		}
-		if err = db.Create(&rates).Error; err != nil {
-			log.Printf("Error storing currencies in database: %v", err)
-		} else {
-			log.Printf("Stored %d currencies in database", len(rates))
-		}
-	}(snapshot)
-	if err = cache.Set(ctx, "currencies:latest", encoded); err != nil {
-		return nil, err
-	}
-	return &snapshot, err
+type IngestionService interface {
+	FetchRates(ctx context.Context) (*models.Snapshot, error)
 }
 
-func GetCachedSnapshot(cache persistence.RedisRepository) (*models.Snapshot, error) {
-	ctx := context.Background()
-	raw, err := cache.Get(ctx, "currencies:latest")
+type ingestionService struct {
+	client       *http.Client
+	currencyRepo repository.CurrencyRepository
+}
+
+func NewIngestionAPIClient(currencyRepo repository.CurrencyRepository) IngestionService {
+	return &ingestionService{
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		currencyRepo: currencyRepo,
+	}
+}
+
+func (s *ingestionService) FetchRates(ctx context.Context) (*models.Snapshot, error) {
+	snapshot, err := s.FetchFromEXCONVERT(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var snapshot models.Snapshot
-	if err = json.Unmarshal([]byte(raw), &snapshot); err != nil {
+	err = s.currencyRepo.StoreSnapshotCache(ctx, snapshot)
+	if err != nil {
 		return nil, err
 	}
+	err = s.currencyRepo.StoreSnapShotPG(ctx, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func (s *ingestionService) FetchFromEXCONVERT(ctx context.Context) (*models.Snapshot, error) {
+	url := os.Getenv("EXCONVERT_URL")
+	if url == "" {
+		return nil, fmt.Errorf(" EXCONVERT_URL environment variable is not set")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	resp, err := s.client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch data from EXCONVERT: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("received non-200 response from EXCONVERT: %d", resp.StatusCode)
+	}
+	var snapshot models.Snapshot
+	if err = json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	snapshot.Timestamp = time.Now()
 	return &snapshot, nil
 }
